@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>My profile — Tuck</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="config.js"></script>
+<script src="app.js"></script>
+</head>
+<body>
+<div class="wrap">
+  <nav class="nav">
+    <a class='brand' href='/'>
+      <svg width="36" height="36" viewBox="0 0 36 36" fill="none" aria-hidden="true"><path d="M6 12h24v10a8 8 0 0 1-8 8h-8a8 8 0 0 1-8-8V12z" stroke="#8C2155" stroke-width="2.5" stroke-linejoin="round"/><path d="M18 16s-6.5-3.8-6.5-8A3.3 3.3 0 0 1 18 6.2 3.3 3.3 0 0 1 24.5 8c0 4.2-6.5 8-6.5 8z" fill="#F28CB5"/></svg>
+      <span>tuck</span>
+    </a>
+    <div class="nav-links">
+      <button id="logout" type="button" class="btn btn-ghost">Log out</button>
+    </div>
+  </nav>
+
+  <main class="auth-page">
+    <div class="card" id="card" hidden>
+      <div class="avatar" id="avatar" aria-hidden="true">?</div>
+      <h1 id="greeting">Your profile</h1>
+      <p class="sub">Update your details. Only you can see and edit them.</p>
+      <div id="msg" class="msg" role="status" hidden></div>
+      <form id="profile-form">
+        <div class="field">
+          <label for="email">Email</label>
+          <input id="email" type="email" readonly>
+        </div>
+        <div class="field">
+          <label for="full_name">Full name</label>
+          <input id="full_name" type="text" maxlength="80" autocomplete="name">
+        </div>
+        <div class="field">
+          <label for="username">Username</label>
+          <input id="username" type="text" maxlength="30" pattern="[A-Za-z0-9_]{3,30}" autocomplete="username">
+          <small>3–30 letters, numbers, or underscores.</small>
+        </div>
+        <div class="field">
+          <label for="savings_goal">What are you saving for?</label>
+          <input id="savings_goal" type="text" maxlength="120" placeholder="Emergency fund, spring break...">
+        </div>
+        <div class="field">
+          <label for="bio">About you</label>
+          <textarea id="bio" maxlength="300" rows="3" placeholder="A line or two about you and your money goals."></textarea>
+        </div>
+        <div class="field">
+          <label for="avatar_url">Profile photo link</label>
+          <input id="avatar_url" type="url" maxlength="500" placeholder="https://">
+          <small>Filled in from Google if you signed in with Google. Paste another image link to change it.</small>
+        </div>
+        <button id="save" type="submit" class="btn btn-plum">Save profile</button>
+      </form>
+    </div>
+  </main>
+</div>
+
+<script>
+(async function () {
+  var user = await getUser();
+  // Not logged in? Send them to the login page.
+  if (!user) { location.replace('login.html'); return; }
+
+  var card = document.getElementById('card');
+  var msg = document.getElementById('msg');
+  var save = document.getElementById('save');
+  var f = {
+    full_name: document.getElementById('full_name'),
+    username: document.getElementById('username'),
+    savings_goal: document.getElementById('savings_goal'),
+    bio: document.getElementById('bio'),
+    avatar_url: document.getElementById('avatar_url')
+  };
+  // Name and photo Google shares when someone signs in with Google.
+  var meta = user.user_metadata || {};
+
+  function isHttpUrl(v) {
+    try { var u = new URL(v); return u.protocol === 'https:' || u.protocol === 'http:'; } catch (e) { return false; }
+  }
+
+  function paintHeader(name, photo) {
+    var label = name || user.email;
+    var avatar = document.getElementById('avatar');
+    document.getElementById('greeting').textContent = name ? 'Hi, ' + name.split(' ')[0] : 'Your profile';
+    avatar.textContent = '';
+    if (photo && isHttpUrl(photo)) {
+      var img = document.createElement('img');
+      img.src = photo;
+      img.alt = '';
+      img.referrerPolicy = 'no-referrer'; // Google photos refuse to load without this
+      img.onerror = function () { avatar.textContent = label.charAt(0).toUpperCase(); };
+      avatar.appendChild(img);
+    } else {
+      avatar.textContent = label.charAt(0).toUpperCase();
+    }
+  }
+
+  document.getElementById('email').value = user.email;
+
+  // Load this user's profile row (it may not exist yet).
+  var res = await sb.from('profiles').select('full_name, username, savings_goal, bio, avatar_url').eq('id', user.id).maybeSingle();
+  if (res.error) {
+    showMsg(msg, 'Could not load your profile: ' + res.error.message, 'error');
+  } else if (res.data) {
+    f.full_name.value = res.data.full_name || '';
+    f.username.value = res.data.username || '';
+    f.savings_goal.value = res.data.savings_goal || '';
+    f.bio.value = res.data.bio || '';
+    f.avatar_url.value = res.data.avatar_url || '';
+  }
+  // First visit after Google sign-in: start with the name and photo from Google.
+  if (!f.full_name.value) f.full_name.value = meta.full_name || meta.name || '';
+  if (!f.avatar_url.value) f.avatar_url.value = meta.avatar_url || meta.picture || '';
+  paintHeader(f.full_name.value.trim(), f.avatar_url.value.trim());
+  card.hidden = false;
+
+  document.getElementById('profile-form').addEventListener('submit', async function (e) {
+    e.preventDefault();
+    var username = f.username.value.trim();
+    if (username && !/^[A-Za-z0-9_]{3,30}$/.test(username)) {
+      showMsg(msg, 'Username must be 3–30 letters, numbers, or underscores.', 'error');
+      return;
+    }
+    var avatarUrl = f.avatar_url.value.trim();
+    if (avatarUrl && !isHttpUrl(avatarUrl)) {
+      showMsg(msg, 'Profile photo must be a full link starting with https://', 'error');
+      return;
+    }
+    save.disabled = true;
+    var row = {
+      id: user.id,
+      full_name: f.full_name.value.trim() || null,
+      username: username || null,
+      savings_goal: f.savings_goal.value.trim() || null,
+      bio: f.bio.value.trim() || null,
+      avatar_url: avatarUrl || null,
+      updated_at: new Date().toISOString()
+    };
+    var out = await sb.from('profiles').upsert(row);
+    save.disabled = false;
+    if (out.error) {
+      var text = out.error.code === '23505' ? 'That username is taken. Try another.' : out.error.message;
+      showMsg(msg, text, 'error');
+    } else {
+      paintHeader(row.full_name, row.avatar_url);
+      showMsg(msg, 'Profile saved.', 'ok');
+    }
+  });
+
+  document.getElementById('logout').addEventListener('click', async function () {
+    await sb.auth.signOut();
+    location.href = 'index.html';
+  });
+})();
+</script>
+</body>
+</html>
